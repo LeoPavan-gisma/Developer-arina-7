@@ -1,0 +1,67 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: real-estate-backend
+    ports:
+      - "8000:8000"
+    environment:
+      PYTHONPATH: /app
+      API_KEY: ${API_KEY:-}
+      DATABASE_PATH: /app/artifacts/predictions.db
+    volumes:
+      - ./artifacts:/app/artifacts
+      - ./data:/app/data
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: real-estate-frontend
+    ports:
+      - "8501:8501"
+    environment:
+      API_URL: http://backend:8000
+      API_KEY: ${API_KEY:-}
+    depends_on:
+      backend:
+        condition: service_healthy
+    command: streamlit run app/frontend/streamlit_app.py --server.address 0.0.0.0 --server.port 8501
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus_data:
+  grafana_data:
